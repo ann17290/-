@@ -262,19 +262,69 @@ ${text}
       config.responseMimeType = 'application/json';
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config,
-    });
+    // Candidate models to fallback gracefully if a model experiences high demand (503)
+    const CANDIDATE_MODELS = [
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
+      'gemini-3.1-pro-preview',
+    ];
+
+    let lastError: any = null;
+    let responseText = '';
+
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
+        });
+
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI Fallback] Model ${model} encountered error:`, err.message || err);
+        // Short delay before trying the next fallback model
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+    }
+
+    if (!responseText) {
+      let rawMsg = lastError?.message || '';
+      try {
+        // Handle if error message is serialized JSON
+        const parsedErr = JSON.parse(rawMsg);
+        if (parsedErr?.error?.message) {
+          rawMsg = parsedErr.error.message;
+        }
+      } catch {}
+
+      const isHighDemand = rawMsg.includes('503') || rawMsg.includes('high demand') || rawMsg.includes('UNAVAILABLE');
+      const thaiError = isHighDemand
+        ? 'ขณะนี้เซิร์ฟเวอร์ AI มีผู้ใช้งานหนาแน่นชั่วคราว (High Demand) กรุณากดปุ่มลองใหม่อีกครั้งใน 5-10 วินาที'
+        : `เกิดข้อผิดพลาดในการประมวลผล AI: ${rawMsg}`;
+
+      return res.status(503).json({
+        error: thaiError,
+      });
+    }
 
     res.json({
-      result: response.text || '',
+      result: responseText,
     });
   } catch (error: any) {
     console.error('Error generating AI content:', error);
+    let rawMsg = error.message || 'เกิดข้อผิดพลาดในการประมวลผล AI';
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error?.message) rawMsg = parsed.error.message;
+    } catch {}
     res.status(500).json({
-      error: error.message || 'เกิดข้อผิดพลาดในการประมวลผล AI',
+      error: rawMsg,
     });
   }
 });

@@ -25,7 +25,10 @@ import {
   ArrowRight,
   FolderInput,
   Wand2,
-  Copy
+  Copy,
+  AlertCircle,
+  RotateCcw,
+  Zap
 } from 'lucide-react';
 
 interface SmartImportModalProps {
@@ -43,6 +46,7 @@ export const SmartImportModal: React.FC<SmartImportModalProps> = ({
 }) => {
   const [importText, setImportText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [parsedData, setParsedData] = useState<any | null>(null);
   const [previewTab, setPreviewTab] = useState<'overview' | 'characters' | 'locations' | 'chapters' | 'diagram'>('overview');
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace');
@@ -97,6 +101,7 @@ export const SmartImportModal: React.FC<SmartImportModalProps> = ({
 
     setIsLoading(true);
     setParsedData(null);
+    setErrorMessage(null);
 
     try {
       const jsonStr = await requestAIAssist('parse_and_link', importText);
@@ -104,12 +109,169 @@ export const SmartImportModal: React.FC<SmartImportModalProps> = ({
       const cleaned = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       setParsedData(parsed);
+      setErrorMessage(null);
     } catch (err: any) {
-      console.error('Failed to parse:', err);
-      alert(`การประมวลผลแยกข้อมูลขัดข้อง: ${err.message}`);
+      console.error('Failed to parse with AI:', err);
+      setErrorMessage(err.message || 'เกิดข้อผิดพลาดในการประมวลผลข้อมูลด้วย AI');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Instant Fallback Local Parser (Runs instantly if AI is experiencing high demand)
+  const handleInstantFallbackParse = () => {
+    if (!importText.trim()) return;
+    setErrorMessage(null);
+    setIsLoading(false);
+
+    const lines = importText.split('\n').map(l => l.trim()).filter(Boolean);
+    
+    // 1. Title detection
+    let title = 'นิยายเรื่องใหม่';
+    const titleLine = lines.find(l => l.startsWith('ชื่อเรื่อง:') || l.startsWith('เรื่อง:'));
+    if (titleLine) {
+      title = titleLine.replace(/^ชื่อเรื่อง:\s*|^เรื่อง:\s*/, '').trim();
+    } else if (lines.length > 0) {
+      title = lines[0].replace(/^[#\s*]+/, '').slice(0, 50);
+    }
+
+    // 2. Genre / Theme / Logline
+    let logline = '';
+    const loglineLine = lines.find(l => l.startsWith('ล็อกไลน์:') || l.startsWith('คำโปรย:'));
+    if (loglineLine) {
+      logline = loglineLine.replace(/^ล็อกไลน์:\s*|^คำโปรย:\s*/, '').trim();
+    } else {
+      logline = lines.slice(0, 3).join(' ').slice(0, 150);
+    }
+
+    // 3. Characters detection
+    const characters: any[] = [];
+    const charMatches = importText.match(/(?:ตัวละคร|ผู้แสดง|ตัวเอก|พระเอก|นางเอก|ตัวร้าย)[\s\S]*?(?=(?:สถานที่|ฉาก|โครงเรื่อง|บทที่|$))/i);
+    const charBlock = charMatches ? charMatches[0] : '';
+    const charLines = charBlock.split('\n').filter(l => l.includes(':') || l.includes('-') || l.includes('1.') || l.includes('2.'));
+    
+    if (charLines.length > 0) {
+      charLines.forEach((cl, idx) => {
+        const cleaned = cl.replace(/^[0-9.-]+\s*/, '').trim();
+        const parts = cleaned.split(/[:\-–]/);
+        const name = parts[0]?.trim();
+        const desc = parts.slice(1).join(':').trim();
+        if (name && name.length < 30 && !name.includes('ตัวละคร') && !name.includes('สถานที่')) {
+          characters.push({
+            name,
+            alias: '',
+            role: idx === 0 ? 'protagonist' : idx === 1 ? 'deuteragonist' : idx === 2 ? 'antagonist' : 'supporting',
+            roleLabel: idx === 0 ? 'ตัวเอก' : idx === 1 ? 'ตัวละครนำ' : idx === 2 ? 'ปรปักษ์' : 'ตัวละครสมทบ',
+            personality: desc || 'มีเอกลักษณ์และความมุ่งมั่น',
+            goal: 'บรรลุเป้าหมายที่ตั้งใจ',
+            coreFlaw: 'มีจุดอ่อนที่ต้องก้าวข้าม',
+            backstory: desc || '',
+            speechHabits: '',
+            color: ['#0284c7', '#b91c1c', '#475569', '#15803d', '#d97706'][idx % 5]
+          });
+        }
+      });
+    }
+
+    if (characters.length === 0) {
+      characters.push({
+        name: 'ตัวละครเอก',
+        alias: '',
+        role: 'protagonist',
+        roleLabel: 'ตัวเอก',
+        personality: 'มุ่งมั่น เด็ดเดี่ยว',
+        goal: 'ทำตามความฝันและปกป้องสิ่งที่รัก',
+        coreFlaw: 'ใจร้อนในบางคราว',
+        backstory: '',
+        color: '#0284c7'
+      });
+    }
+
+    // 4. Chapters detection
+    const chapters: any[] = [];
+    const chapterRegex = /(?:บทที่|ตอนที่|Chapter)\s*([0-9๑-๙ivxIVX]+|[^\n:]+)[:\s-–]*([^\n]*)/g;
+    let match;
+    const chapterIndices: { index: number; title: string }[] = [];
+    while ((match = chapterRegex.exec(importText)) !== null) {
+      chapterIndices.push({
+        index: match.index,
+        title: match[0].trim(),
+      });
+    }
+
+    if (chapterIndices.length > 0) {
+      for (let i = 0; i < chapterIndices.length; i++) {
+        const current = chapterIndices[i];
+        const next = chapterIndices[i + 1];
+        const chapterContent = next 
+          ? importText.slice(current.index, next.index).trim()
+          : importText.slice(current.index).trim();
+        
+        const linesOfChapter = chapterContent.split('\n');
+        const chapterTitle = linesOfChapter[0] || `บทที่ ${i + 1}`;
+        const body = linesOfChapter.slice(1).join('\n').trim();
+
+        chapters.push({
+          title: chapterTitle,
+          summary: body.slice(0, 120) || 'เหตุการณ์ดำเนินเรื่อง',
+          content: body || chapterContent,
+          povCharacterName: characters[0]?.name,
+          locationName: 'สถานที่หลัก'
+        });
+      }
+    } else {
+      // If no chapter headers found, split into 3 chapters
+      const paragraphs = importText.split('\n\n').filter(p => p.trim().length > 0);
+      const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 3));
+      for (let i = 0; i < 3; i++) {
+        const chunkParas = paragraphs.slice(i * chunkSize, (i + 1) * chunkSize);
+        if (chunkParas.length > 0) {
+          chapters.push({
+            title: `บทที่ ${['๑: จุดเริ่มต้น', '๒: จุดเปลี่ยนผัน', '๓: บทสรุป'][i]}`,
+            summary: chunkParas[0].slice(0, 100),
+            content: chunkParas.join('\n\n'),
+            povCharacterName: characters[0]?.name,
+            locationName: 'สถานที่หลัก'
+          });
+        }
+      }
+    }
+
+    const locations = [
+      {
+        name: 'สถานที่หลักของเรื่อง',
+        type: 'สถานที่ทั่วไป',
+        atmosphere: 'บรรยากาศมีเอกลักษณ์',
+        visualSensory: 'ภาพทิวทัศน์ที่เด่นชัด',
+        audioSensory: 'เสียงแวดล้อมเฉพาะตัว',
+        scentSensory: 'กลิ่นอายธรรมชาติ',
+        tactileSensory: 'อุณหภูมิสบาย',
+        historyLore: 'มีประวัติศาสตร์ยาวนาน',
+        rulesOrMagic: ''
+      }
+    ];
+
+    const storyBeats = [
+      { act: 'Act 1', title: 'จุดเริ่มต้น', timing: '0-25%', description: 'ปูพื้นฐานเรื่องราวและตัวละคร' },
+      { act: 'Act 2', title: 'การเผชิญหน้าอุปสรรค', timing: '25-75%', description: 'ความขัดแย้งทวีความรุนแรง' },
+      { act: 'Act 3', title: 'จุดไคลแมกซ์และคลี่คลาย', timing: '75-100%', description: 'การตัดสินใจครั้งสำคัญ' }
+    ];
+
+    const fallbackResult = {
+      title,
+      genre: 'วรรณกรรมสร้างสรรค์',
+      logline,
+      synopsis: importText.slice(0, 500),
+      theme: 'การเผชิญหน้าและการเติบโต',
+      tone: 'น่าติดตาม',
+      characters,
+      locations,
+      chapters,
+      storyBeats,
+      relationships: []
+    };
+
+    setParsedData(fallbackResult);
   };
 
   // Convert parsed data into fully linked NovelProject
@@ -330,6 +492,45 @@ export const SmartImportModal: React.FC<SmartImportModalProps> = ({
                 ))}
               </div>
             </div>
+
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/70 text-xs space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-amber-300 text-xs">
+                      {errorMessage.includes('หนาแน่น') || errorMessage.includes('503') || errorMessage.includes('High Demand')
+                        ? 'เซิร์ฟเวอร์ AI มีผู้ใช้งานหนาแน่นชั่วคราว (High Demand)'
+                        : 'การประมวลผลด้วย AI พบข้อขัดข้อง'}
+                    </h4>
+                    <p className="text-[11px] text-stone-300 mt-0.5 leading-relaxed">
+                      {errorMessage}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 border-t border-amber-900/50">
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeAndDissect}
+                    disabled={isLoading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-400 hover:bg-amber-300 text-stone-950 font-semibold text-xs shadow-sm transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>ลองอีกครั้ง (Retry)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleInstantFallbackParse}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 font-medium text-xs border border-stone-700 transition-colors"
+                    title="สกัดหัวข้อและบทจากข้อความทันทีโดยไม่ต้องรอ AI"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>สกัดด่วนทันใจ</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={handleAnalyzeAndDissect}
