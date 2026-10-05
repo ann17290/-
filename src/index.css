@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-thai-serif: 'Noto Serif Thai', Georgia, Cambria, serif;
+    --font-thai-sans: 'Sarabun', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  body {
+    font-family: var(--font-thai-sans);
+  }
+}
+
+.font-serif-thai {
+  font-family: var(--font-thai-serif);
+}
+
+.font-sans-thai {
+  font-family: var(--font-thai-sans);
+}
+
+/* Custom scrollbars for editor & panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(160, 160, 160, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(160, 160, 160, 0.35);
+}
+
+/* Print Styles for Novel Book Typesetting */
+@media print {
+  @page {
+    size: A5;
+    margin: 12mm 12mm 12mm 15mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  /* Force page breaks between book pages */
+  .print\\:break-after-page {
+    break-after: page;
+    page-break-after: always;
+  }
+}
+
